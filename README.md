@@ -38,6 +38,23 @@ node src/cli/main.ts summary --since 2026-10-01 --source codex
 
 The database defaults to `~/.sundance/usage.db`. Override it with `--db` or `SUNDANCE_DB`.
 
+## Synthetic workload
+
+`generate` adds a reproducible workload for a fictional company (source `synthetic`). It has
+healthy features and features with one known kind of waste each: an uncached repeated system
+prompt, a frontier model doing single-label classification, outputs truncated by `max_tokens`,
+retry storms, and a nightly job that could use the Batch API. The same seed and end date always
+produce the same calls, so re-running it adds nothing.
+
+```sh
+node src/cli/main.ts generate --db demo.db --seed 42 --days 30 --manifest planted.json
+node src/cli/main.ts summary --db demo.db --source synthetic --by project
+```
+
+`--manifest` writes the planted waste (calls and tokens affected per kind) as JSON. Use it as
+ground truth when checking analyzers. Use a separate `--db` to keep synthetic data apart from
+your own usage.
+
 ## Adding a source
 
 Implement `SourceAdapter` (`src/adapters/types.ts`), with `defaultRoots`, `discover` and
