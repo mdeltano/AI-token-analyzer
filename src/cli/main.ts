@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -7,6 +7,7 @@ import { adapters, findAdapter, type AdapterEnv } from '../adapters/index.ts';
 import { importAll } from '../importer.ts';
 import { groupings, summarize, type Grouping } from '../report/summary.ts';
 import { UsageStore } from '../store/db.ts';
+import { generateWorkload, SYNTHETIC_SOURCE } from '../synth/workload.ts';
 
 const USAGE = `Usage: sundance <command> [options]
 
@@ -14,14 +15,21 @@ Commands:
   sources                 List supported tools and where their logs were found
   import                  Import usage from every detected tool's local logs
   summary                 Show token usage totals
+  generate                Add a synthetic company workload with known, planted waste
 
 Options:
   --db <path>             Database file (default: $SUNDANCE_DB or ~/.sundance/usage.db)
-  --source <id>           Limit import/summary to one tool (see \`sundance sources\`)
+  --source <id>           Limit import/summary to one tool (see \`sundance sources\`);
+                          summary also accepts "${SYNTHETIC_SOURCE}"
   --path <dir>            import: read logs from this directory instead of the default (repeatable)
   --full                  import: re-read files that are unchanged since the last import
   --by <grouping>         summary: ${Object.keys(groupings).join(' | ')} (default: source)
   --since <YYYY-MM-DD>    summary: only usage on or after this date
+  --seed <n>              generate: random seed (default: 42)
+  --days <n>              generate: days of traffic (default: 30)
+  --end <YYYY-MM-DD>      generate: last day covered (default: yesterday)
+  --scale <x>             generate: call volume multiplier (default: 1)
+  --manifest <file>       generate: also write the planted-waste manifest as JSON
 `;
 
 const fmt = new Intl.NumberFormat('en-US');
@@ -44,6 +52,11 @@ function main(argv: string[]): number {
       full: { type: 'boolean', default: false },
       by: { type: 'string', default: 'source' },
       since: { type: 'string' },
+      seed: { type: 'string' },
+      days: { type: 'string' },
+      end: { type: 'string' },
+      scale: { type: 'string' },
+      manifest: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -55,7 +68,8 @@ function main(argv: string[]): number {
 
   const ctx: AdapterEnv = { home: homedir(), env: process.env };
   const selected = values.source ? findAdapter(values.source) : undefined;
-  if (values.source && !selected) {
+  const synthetic = values.source === SYNTHETIC_SOURCE && command === 'summary';
+  if (values.source && !selected && !synthetic) {
     process.stderr.write(`Unknown source "${values.source}". Known: ${adapters.map((a) => a.id).join(', ')}\n`);
     return 1;
   }
@@ -89,7 +103,7 @@ function main(argv: string[]): number {
         process.stderr.write(`--by must be one of: ${Object.keys(groupings).join(', ')}\n`);
         return 1;
       }
-      const rows = summarize(store, values.by as Grouping, { since: values.since, source: selected?.id });
+      const rows = summarize(store, values.by as Grouping, { since: values.since, source: values.source });
       if (!rows.length) {
         console.log('No usage stored yet. Run `sundance import` first.');
         return 0;
@@ -104,6 +118,20 @@ function main(argv: string[]): number {
         fmt.format(r.cacheWrite), fmt.format(r.total), pct(r.cacheHitRate),
       ]);
       console.log(table([values.by, 'calls', 'input', 'output', 'cache read', 'cache write', 'total', 'cache hit'], body));
+      return 0;
+    }
+
+    if (command === 'generate') {
+      const num = (v: string | undefined) => (v === undefined ? undefined : Number(v));
+      const workload = generateWorkload({ seed: num(values.seed), days: num(values.days), end: values.end, scale: num(values.scale) });
+      const added = store.insert(workload.events);
+      if (values.manifest) writeFileSync(values.manifest, JSON.stringify({ ...workload.options, planted: workload.planted }, null, 2) + '\n');
+      const { seed, days, end } = workload.options;
+      console.log(`Generated ${fmt.format(workload.events.length)} calls (${fmt.format(added)} new) for ${days} days ending ${end}, seed ${seed}.\n`);
+      console.log(table(
+        ['planted waste', 'project', 'model', 'calls', 'tokens'],
+        workload.planted.map((p) => [p.kind, p.project, p.model, fmt.format(p.events), fmt.format(p.tokens)]),
+      ));
       return 0;
     }
   } finally {
