@@ -16,6 +16,7 @@ and OpenAI usage APIs. Apart from those optional requests, nothing leaves your m
 | `opencode`    | OpenCode           | `~/.local/share/opencode` (`OPENCODE_DATA_DIR`, `XDG_DATA_HOME`) |
 | `amp`         | Amp                | `~/.local/share/amp/threads` (`AMP_DATA_DIR`)          |
 | `copilot-cli` | GitHub Copilot CLI | `~/.copilot/session-state` (`COPILOT_HOME`)            |
+| `otel`        | OpenTelemetry export | `~/.sundance/otel` (`SUNDANCE_OTEL_DIR`); see below  |
 
 Each tool counts tokens differently. For example, OpenAI and Gemini count cached tokens as
 part of input, and Gemini reports reasoning separately from output. Sundance converts every
@@ -38,6 +39,35 @@ node src/cli/main.ts summary --since 2026-10-01 --source codex
 ```
 
 The database defaults to `~/.sundance/usage.db`. Override it with `--db` or `SUNDANCE_DB`.
+
+## OpenTelemetry exports
+
+The `otel` source reads per-request data from OpenTelemetry exports in the OTLP JSON
+encoding, the format the OpenTelemetry Collector's `file` exporter writes. Each line is one
+export request; a single pretty-printed export also works. Drop files into `~/.sundance/otel`, or
+point at a file or folder:
+
+```sh
+node src/cli/main.ts import --source otel --path ./otel-export.jsonl
+```
+
+Two kinds of record are read:
+
+- **GenAI inference spans** that follow the
+  [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
+  (operations `chat`, `text_completion`, `generate_content` and `embeddings`). Agent and tool
+  spans are skipped because they wrap the model calls. The project is the resource's
+  `service.name`, unless a span sets `sundance.feature`. A `sundance.trigger` attribute (for
+  example `cron`) marks scheduled calls for the batch analyzer.
+- **Claude Code `claude_code.api_request` events**, which Claude Code exports as OTel logs when
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1` and `OTEL_LOGS_EXPORTER=otlp`. They duplicate what the
+  `claude-code` source reads from local transcripts, so import one or the other for the same
+  machine.
+
+Spans record the stop reason, `max_tokens` and latency that aggregate sources lack. When an
+instrumentation records prompt content (`gen_ai.system_instructions`, `gen_ai.tool.definitions`,
+`gen_ai.input.messages`), Sundance stores only a hash of it. That hash is enough to detect repeated
+prefixes and retried requests, and the text itself is never written to the database.
 
 ## Provider usage APIs
 
@@ -143,6 +173,6 @@ the same when the file is parsed again, so re-imports never double-count.
 ## Development
 
 ```sh
-npm test          # node:test: adapter and connector fixtures, synthetic workload, analyzers, suggest
+npm test          # node:test: adapter (including OTel) and connector fixtures, synthetic workload, analyzers, suggest
 npm run typecheck
 ```
