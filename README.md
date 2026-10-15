@@ -91,6 +91,30 @@ evidence isn't there. Findings can overlap, so their savings don't always add up
 Dollar figures use the list prices in `src/pricing/prices.ts` (first-party API, standard tier).
 Models missing from that table are reported in tokens only.
 
+## Drafting fixes
+
+`suggest` takes the largest findings and asks Claude to draft the concrete change for each one:
+where to make it, the rewritten prompt, code or config, how to verify the saving, and caveats.
+Savings figures stay the analyzer's own estimate; the model is not asked to produce them.
+
+```sh
+node src/cli/main.ts suggest                          # the 3 largest findings
+node src/cli/main.ts suggest --finding 2 --context src/support-bot.ts
+node src/cli/main.ts suggest --top 5 --model sonnet
+```
+
+Requests go through the Claude Code CLI (`claude -p`), so they run under whatever account it is
+signed in with: a Claude subscription's usage limits, or the API key it is configured with
+(including `ANTHROPIC_API_KEY` in the environment). Install Claude Code and run `claude` once to
+sign in. Each request runs without tools, settings, `CLAUDE.md`, memory or MCP servers, so only
+Sundance's prompt is sent.
+
+The model sees the finding (project, model, call and token counts, evidence, recommendation) and,
+with `--context`, the contents of that one file. Without a context file, Sundance stores only
+hashes of prompts, so the draft names what to look for and gives a template rather than an edit.
+Pass the file that holds the prompt or API call for a rewrite of the actual code; files over
+200,000 characters are refused rather than cut.
+
 ## Synthetic workload
 
 `generate` adds a reproducible workload for a fictional company (source `synthetic`). It has
@@ -119,6 +143,6 @@ the same when the file is parsed again, so re-imports never double-count.
 ## Development
 
 ```sh
-npm test          # node:test: adapter and connector fixtures, synthetic workload, analyzers
+npm test          # node:test: adapter and connector fixtures, synthetic workload, analyzers, suggest
 npm run typecheck
 ```
