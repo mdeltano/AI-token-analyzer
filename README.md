@@ -38,6 +38,32 @@ node src/cli/main.ts summary --since 2026-10-01 --source codex
 
 The database defaults to `~/.sundance/usage.db`. Override it with `--db` or `SUNDANCE_DB`.
 
+## Finding waste
+
+```sh
+node src/cli/main.ts analyze                      # all stored usage
+node src/cli/main.ts analyze --source claude-code --since 2026-10-01
+```
+
+`analyze` runs a set of rule-based analyzers. Each one reports the project and model affected,
+the calls and tokens involved, what in the data shows the problem, a concrete fix, and an
+estimate of what the fix would have saved over the analyzed period.
+
+| Waste              | Detected from                                              | Savings estimate |
+|--------------------|------------------------------------------------------------|------------------|
+| `uncached-prefix`  | calls sharing a prompt prefix hash with almost no cache reads | prefix billed at cache-read rather than input price, minus cache writes after idle gaps |
+| `oversized-model`  | a frontier or mid-tier model returning ~16 tokens or fewer per call, outside agent loops | the same tokens at the vendor's small model |
+| `truncated-output` | calls stopped by `max_tokens` that were then sent again      | cost of the cut-off calls |
+| `retry-storm`      | identical requests repeated within two minutes              | cost of every attempt after the first |
+| `batch-eligible`   | scheduled jobs, or large sessions of independent calls       | the batch API's 50% discount |
+
+Several analyzers need request-level fields (prefix hashes, stop reasons, request hashes)
+that coding-tool logs only partly record, so a source can show no findings simply because the
+evidence isn't there. Findings can overlap, so their savings don't always add up.
+
+Dollar figures use the list prices in `src/pricing/prices.ts` (first-party API, standard tier).
+Models missing from that table are reported in tokens only.
+
 ## Synthetic workload
 
 `generate` adds a reproducible workload for a fictional company (source `synthetic`). It has
@@ -49,10 +75,12 @@ produce the same calls, so re-running it adds nothing.
 ```sh
 node src/cli/main.ts generate --db demo.db --seed 42 --days 30 --manifest planted.json
 node src/cli/main.ts summary --db demo.db --source synthetic --by project
+node src/cli/main.ts analyze --db demo.db --source synthetic
 ```
 
-`--manifest` writes the planted waste (calls and tokens affected per kind) as JSON. Use it as
-ground truth when checking analyzers. Use a separate `--db` to keep synthetic data apart from
+`--manifest` writes the planted waste (calls and tokens affected per kind) as JSON. It is the
+ground truth for the analyzers: the tests check that each one reports exactly the planted calls
+and tokens, and nothing on the healthy features. Use a separate `--db` to keep synthetic data apart from
 your own usage.
 
 ## Adding a source
@@ -64,6 +92,6 @@ the same when the file is parsed again, so re-imports never double-count.
 ## Development
 
 ```sh
-npm test          # node:test, fixture-based adapter tests
+npm test          # node:test: adapter fixtures, synthetic workload, analyzers
 npm run typecheck
 ```
