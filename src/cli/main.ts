@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { adapters, findAdapter, type AdapterEnv } from '../adapters/index.ts';
 import { analyze, analyzers } from '../analyze/index.ts';
@@ -9,6 +9,7 @@ import { connectors, fetchAll, findConnector } from '../connectors/index.ts';
 import { importAll } from '../importer.ts';
 import { groupings, summarize, type Grouping } from '../report/summary.ts';
 import { UsageStore } from '../store/db.ts';
+import { suggestFix, type SuggestContext, type Suggestion } from '../suggest/index.ts';
 import { generateWorkload, SYNTHETIC_SOURCE } from '../synth/workload.ts';
 
 const USAGE = `Usage: sundance <command> [options]
@@ -19,6 +20,7 @@ Commands:
   fetch                   Fetch daily usage from provider usage APIs (needs admin keys)
   summary                 Show token usage totals
   analyze                 Find wasted tokens and estimate what fixing each case saves
+  suggest                 Draft concrete fixes for the top findings with Claude (via the Claude Code CLI)
   generate                Add a synthetic company workload with known, planted waste
 
 Options:
@@ -28,8 +30,12 @@ Options:
   --path <dir>            import: read logs from this directory instead of the default (repeatable)
   --full                  import: re-read files that are unchanged since the last import
   --by <grouping>         summary: ${Object.keys(groupings).join(' | ')} (default: source)
-  --since <YYYY-MM-DD>    summary/analyze: only usage on or after this date;
+  --since <YYYY-MM-DD>    summary/analyze/suggest: only usage on or after this date;
                           fetch: first day to fetch (default: 30 days ago)
+  --finding <n>           suggest: draft a fix for finding n (as numbered by analyze; repeatable)
+  --top <n>               suggest: without --finding, draft fixes for the n largest findings (default: 3)
+  --context <file>        suggest: a prompt, config or source file for Claude to rewrite directly
+  --model <model>         suggest: model for Claude Code to use (default: its configured model)
   --seed <n>              generate: random seed (default: 42)
   --days <n>              generate: days of traffic (default: 30)
   --end <YYYY-MM-DD>      generate: last day covered (default: yesterday)
@@ -49,6 +55,18 @@ function table(headers: string[], rows: string[][]): string {
   return [line(headers), widths.map((w) => '-'.repeat(w)).join('  '), ...rows.map(line)].join('\n');
 }
 
+function formatSuggestion(s: Suggestion): string {
+  const indent = (text: string, pad: string) => text.trimEnd().split('\n').map((l) => pad + l).join('\n');
+  const out = [indent(s.summary, '   ')];
+  s.changes.forEach((c, i) => {
+    out.push('', `   Change ${i + 1}: ${c.where}`, indent(c.what, '     '));
+    if (c.snippet.trim()) out.push('', indent(c.snippet, '       | '));
+  });
+  out.push('', indent(`Verify: ${s.verify}`, '   '));
+  if (s.caveats.trim()) out.push(indent(`Caveats: ${s.caveats}`, '   '));
+  return out.join('\n');
+}
+
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -65,6 +83,10 @@ async function main(argv: string[]): Promise<number> {
       end: { type: 'string' },
       scale: { type: 'string' },
       manifest: { type: 'string' },
+      finding: { type: 'string', multiple: true },
+      top: { type: 'string' },
+      context: { type: 'string' },
+      model: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -176,6 +198,57 @@ async function main(argv: string[]): Promise<number> {
         console.log(`\n${i + 1}. ${title}: ${f.project ?? '(no project)'} on ${f.model}\n   ${f.evidence}\n   Fix: ${f.recommendation}`);
       });
       return 0;
+    }
+
+    if (command === 'suggest') {
+      const { findings } = analyze(store.events({ since: values.since, source: values.source }));
+      if (!findings.length) {
+        console.log('No waste found, so there is nothing to suggest. Run `sundance analyze` for details.');
+        return 0;
+      }
+      const top = values.top === undefined ? 3 : Number(values.top);
+      const picks = values.finding?.map(Number) ?? Array.from({ length: Math.min(top, findings.length) }, (_, i) => i + 1);
+      const bad = [top, ...picks].find((n) => !Number.isInteger(n) || n < 1);
+      if (bad !== undefined || picks.some((n) => n > findings.length)) {
+        process.stderr.write(`--finding and --top take whole numbers; there are ${findings.length} findings (see \`sundance analyze\`).\n`);
+        return 1;
+      }
+      let context: SuggestContext | undefined;
+      if (values.context) {
+        try {
+          context = { name: basename(values.context), text: readFileSync(values.context, 'utf8') };
+        } catch (err) {
+          process.stderr.write(`Cannot read --context file: ${(err as Error).message}
+`);
+          return 1;
+        }
+      }
+
+      let failed = 0;
+      let cost = 0;
+      const models = new Set<string>();
+      for (const n of picks) {
+        const f = findings[n - 1]!;
+        const title = analyzers.find((a) => a.kind === f.kind)!.title;
+        const savings = f.savingsUsd === null ? '' : `, est. savings ${usd.format(f.savingsUsd)}`;
+        console.log(`
+${n}. ${title}: ${f.project ?? '(no project)'} on ${f.model}${savings}`);
+        try {
+          const res = await suggestFix(f, { model: values.model, context });
+          console.log(formatSuggestion(res.suggestion));
+          res.models.forEach((m) => models.add(m));
+          cost += res.costUsd ?? 0;
+        } catch (err) {
+          failed++;
+          console.log(`   Could not draft a fix: ${(err as Error).message}`);
+        }
+      }
+      if (models.size) {
+        console.log(`
+Drafted by ${[...models].join(', ')} through Claude Code (${usd.format(cost)} at API list price; ` +
+          'on a Claude subscription this counts toward plan limits instead).');
+      }
+      return failed ? 1 : 0;
     }
 
     if (command === 'generate') {
