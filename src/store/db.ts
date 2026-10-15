@@ -67,6 +67,41 @@ export class UsageStore {
     return added;
   }
 
+  /** Read stored events back, oldest first. */
+  events(filter: { since?: string; source?: string } = {}): UsageEvent[] {
+    const where: string[] = [];
+    const params: Record<string, string> = {};
+    if (filter.since) {
+      where.push('ts >= :since');
+      params.since = filter.since;
+    }
+    if (filter.source) {
+      where.push('source = :source');
+      params.source = filter.source;
+    }
+    const rows = this.db
+      .prepare(`SELECT * FROM usage_events ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ts, dedupe_key`)
+      .all(params) as Record<string, string | number | null>[];
+    return rows.map((r) => ({
+      dedupeKey: r.dedupe_key as string,
+      source: r.source as string,
+      vendor: r.vendor as string,
+      model: r.model as string,
+      ts: r.ts as string,
+      sessionId: r.session_id as string | null,
+      project: r.project as string | null,
+      inputTokens: r.input_tokens as number,
+      outputTokens: r.output_tokens as number,
+      reasoningTokens: r.reasoning_tokens as number,
+      cacheReadTokens: r.cache_read_tokens as number,
+      cacheWriteTokens: r.cache_write_tokens as number,
+      recordedCostUsd: r.recorded_cost_usd as number | null,
+      granularity: r.granularity as UsageEvent['granularity'],
+      sourceFile: r.source_file as string,
+      meta: JSON.parse(r.meta as string) as UsageEvent['meta'],
+    }));
+  }
+
   fileStamp(path: string): FileStamp | undefined {
     const row = this.db.prepare('SELECT size, mtime_ms FROM imported_files WHERE path = ?').get(path) as
       | { size: number; mtime_ms: number }
