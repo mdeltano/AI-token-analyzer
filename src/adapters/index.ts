@@ -4,10 +4,11 @@ import { codex } from './codex.ts';
 import { copilotCli } from './copilot-cli.ts';
 import { gemini } from './gemini.ts';
 import { opencode } from './opencode.ts';
+import { otel } from './otel.ts';
 import { qwen } from './qwen.ts';
 import type { SourceAdapter } from './types.ts';
 
-export const adapters: readonly SourceAdapter[] = [claudeCode, codex, gemini, qwen, opencode, amp, copilotCli];
+export const adapters: readonly SourceAdapter[] = [claudeCode, codex, gemini, qwen, opencode, amp, copilotCli, otel];
 
 export function findAdapter(id: string): SourceAdapter | undefined {
   return adapters.find((a) => a.id === id);

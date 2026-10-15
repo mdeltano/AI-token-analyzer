@@ -16,7 +16,7 @@ const USAGE = `Usage: sundance <command> [options]
 
 Commands:
   sources                 List supported tools and provider APIs, and what was found
-  import                  Import usage from every detected tool's local logs
+  import                  Import usage from every detected tool's local logs and OpenTelemetry exports
   fetch                   Fetch daily usage from provider usage APIs (needs admin keys)
   summary                 Show token usage totals
   analyze                 Find wasted tokens and estimate what fixing each case saves
@@ -27,7 +27,7 @@ Options:
   --db <path>             Database file (default: $SUNDANCE_DB or ~/.sundance/usage.db)
   --source <id>           Limit import/fetch/summary/analyze to one source (see \`sundance sources\`);
                           summary and analyze also accept "${SYNTHETIC_SOURCE}"
-  --path <dir>            import: read logs from this directory instead of the default (repeatable)
+  --path <dir|file>       import: read logs from here instead of the default locations (repeatable)
   --full                  import: re-read files that are unchanged since the last import
   --by <grouping>         summary: ${Object.keys(groupings).join(' | ')} (default: source)
   --since <YYYY-MM-DD>    summary/analyze/suggest: only usage on or after this date;
