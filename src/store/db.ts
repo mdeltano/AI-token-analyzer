@@ -52,18 +52,36 @@ export class UsageStore {
 
   /** Insert events, ignoring ones already stored. Returns how many were new. */
   insert(events: UsageEvent[]): number {
+    let added = 0;
+    this.transaction(() => {
+      added = this.insertRows(events);
+    });
+    return added;
+  }
+
+  /**
+   * Replace a source's events with `ts` in [since, until) by `events`, for sources that report
+   * rollups which can change after they are first read. Returns how many events were stored.
+   */
+  replaceRange(source: string, since: string, until: string, events: UsageEvent[]): number {
+    let added = 0;
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM usage_events WHERE source = ? AND ts >= ? AND ts < ?').run(source, since, until);
+      added = this.insertRows(events);
+    });
+    return added;
+  }
+
+  private insertRows(events: UsageEvent[]): number {
     const stmt = this.db.prepare(`
       INSERT OR IGNORE INTO usage_events VALUES (
         :dedupeKey, :source, :vendor, :model, :ts, :sessionId, :project, :inputTokens, :outputTokens,
         :reasoningTokens, :cacheReadTokens, :cacheWriteTokens, :recordedCostUsd, :granularity, :sourceFile, :meta)`);
     let added = 0;
-    this.transaction(() => {
-      for (const raw of events) {
-        const e = usageEventSchema.parse(raw);
-        const r = stmt.run({ ...e, meta: JSON.stringify(e.meta) });
-        added += Number(r.changes);
-      }
-    });
+    for (const raw of events) {
+      const e = usageEventSchema.parse(raw);
+      added += Number(stmt.run({ ...e, meta: JSON.stringify(e.meta) }).changes);
+    }
     return added;
   }
 
