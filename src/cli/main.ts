@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { adapters, findAdapter, type AdapterEnv } from '../adapters/index.ts';
 import { analyze, analyzers } from '../analyze/index.ts';
+import { connectors, fetchAll, findConnector } from '../connectors/index.ts';
 import { importAll } from '../importer.ts';
 import { groupings, summarize, type Grouping } from '../report/summary.ts';
 import { UsageStore } from '../store/db.ts';
@@ -13,20 +14,22 @@ import { generateWorkload, SYNTHETIC_SOURCE } from '../synth/workload.ts';
 const USAGE = `Usage: sundance <command> [options]
 
 Commands:
-  sources                 List supported tools and where their logs were found
+  sources                 List supported tools and provider APIs, and what was found
   import                  Import usage from every detected tool's local logs
+  fetch                   Fetch daily usage from provider usage APIs (needs admin keys)
   summary                 Show token usage totals
   analyze                 Find wasted tokens and estimate what fixing each case saves
   generate                Add a synthetic company workload with known, planted waste
 
 Options:
   --db <path>             Database file (default: $SUNDANCE_DB or ~/.sundance/usage.db)
-  --source <id>           Limit import/summary/analyze to one tool (see \`sundance sources\`);
+  --source <id>           Limit import/fetch/summary/analyze to one source (see \`sundance sources\`);
                           summary and analyze also accept "${SYNTHETIC_SOURCE}"
   --path <dir>            import: read logs from this directory instead of the default (repeatable)
   --full                  import: re-read files that are unchanged since the last import
   --by <grouping>         summary: ${Object.keys(groupings).join(' | ')} (default: source)
-  --since <YYYY-MM-DD>    summary/analyze: only usage on or after this date
+  --since <YYYY-MM-DD>    summary/analyze: only usage on or after this date;
+                          fetch: first day to fetch (default: 30 days ago)
   --seed <n>              generate: random seed (default: 42)
   --days <n>              generate: days of traffic (default: 30)
   --end <YYYY-MM-DD>      generate: last day covered (default: yesterday)
@@ -46,7 +49,7 @@ function table(headers: string[], rows: string[][]): string {
   return [line(headers), widths.map((w) => '-'.repeat(w)).join('  '), ...rows.map(line)].join('\n');
 }
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -73,9 +76,12 @@ function main(argv: string[]): number {
 
   const ctx: AdapterEnv = { home: homedir(), env: process.env };
   const selected = values.source ? findAdapter(values.source) : undefined;
-  const synthetic = values.source === SYNTHETIC_SOURCE && (command === 'summary' || command === 'analyze');
-  if (values.source && !selected && !synthetic) {
-    process.stderr.write(`Unknown source "${values.source}". Known: ${adapters.map((a) => a.id).join(', ')}\n`);
+  const connector = values.source ? findConnector(values.source) : undefined;
+  const known = command === 'import' ? adapters.map((a) => a.id)
+    : command === 'fetch' ? connectors.map((c) => c.id)
+    : [...adapters.map((a) => a.id), ...connectors.map((c) => c.id), SYNTHETIC_SOURCE];
+  if (values.source && !known.includes(values.source)) {
+    process.stderr.write(`Unknown source "${values.source}" for ${command}. Known: ${known.join(', ')}\n`);
     return 1;
   }
 
@@ -84,7 +90,8 @@ function main(argv: string[]): number {
       const found = a.defaultRoots(ctx).filter((r) => existsSync(r));
       return [a.id, a.displayName, found.length ? found.join(', ') : '(not found)'];
     });
-    console.log(table(['id', 'tool', 'log location'], rows));
+    for (const c of connectors) rows.push([c.id, c.displayName, `${c.keyEnv} ${ctx.env[c.keyEnv] ? 'is set' : 'not set'}`]);
+    console.log(table(['id', 'source', 'found'], rows));
     return 0;
   }
 
@@ -101,6 +108,22 @@ function main(argv: string[]): number {
         .map((r) => [r.source, fmt.format(r.filesSeen), fmt.format(r.filesParsed), fmt.format(r.eventsParsed), fmt.format(r.eventsAdded)]);
       console.log(rows.length ? table(['source', 'files', 'parsed', 'events', 'new'], rows) : 'No logs found for any supported tool.');
       return 0;
+    }
+
+    if (command === 'fetch') {
+      const today = new Date(new Date().toISOString().slice(0, 10));
+      const since = values.since ? new Date(values.since) : new Date(today.getTime() - 30 * 86_400_000);
+      if ((values.since && !/^\d{4}-\d{2}-\d{2}$/.test(values.since)) || Number.isNaN(since.getTime()) || since >= today) {
+        process.stderr.write('--since must be a date (YYYY-MM-DD) before today.\n');
+        return 1;
+      }
+      const results = await fetchAll(store, ctx.env, { connectors: connector ? [connector] : undefined, since, until: today });
+      const last = new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10);
+      console.log(`Daily usage from ${since.toISOString().slice(0, 10)} through ${last} (UTC):\n`);
+      console.log(table(['source', 'status', 'daily rows', 'tokens'], results.map((r) => [
+        r.source, r.status === 'ok' ? 'ok' : `${r.status}: ${r.detail}`, fmt.format(r.events), fmt.format(r.tokens),
+      ])));
+      return results.some((r) => r.status === 'failed') ? 1 : 0;
     }
 
     if (command === 'summary') {
@@ -176,4 +199,4 @@ function main(argv: string[]): number {
   return 1;
 }
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));
