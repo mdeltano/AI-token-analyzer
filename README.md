@@ -2,7 +2,8 @@
 
 Sundance finds wasted LLM tokens and suggests how to cut them. It runs locally: it reads the
 logs your AI coding tools already write, normalizes them into one usage format, and stores
-them in a local SQLite database. Nothing leaves your machine.
+them in a local SQLite database. It can also read an organization's usage from the Anthropic
+and OpenAI usage APIs. Apart from those optional requests, nothing leaves your machine.
 
 ## Supported sources
 
@@ -37,6 +38,32 @@ node src/cli/main.ts summary --since 2026-10-01 --source codex
 ```
 
 The database defaults to `~/.sundance/usage.db`. Override it with `--db` or `SUNDANCE_DB`.
+
+## Provider usage APIs
+
+`fetch` pulls an organization's daily usage from the providers' own usage APIs. It needs an admin
+key, which is read-only for usage data, and the key is only sent to that provider.
+
+| id              | API                                                   | Key variable          |
+|-----------------|-------------------------------------------------------|-----------------------|
+| `anthropic-api` | Anthropic Admin API, `/v1/organizations/usage_report/messages` | `ANTHROPIC_ADMIN_KEY` (`sk-ant-admin01-...`) |
+| `openai-api`    | OpenAI Usage API, `/v1/organization/usage/completions` | `OPENAI_ADMIN_KEY`    |
+
+```sh
+ANTHROPIC_ADMIN_KEY=sk-ant-admin01-... node src/cli/main.ts fetch   # last 30 days, every key that is set
+node src/cli/main.ts fetch --source openai-api --since 2026-09-01
+node src/cli/main.ts summary --source anthropic-api --by model
+```
+
+Each stored row is one UTC day's totals for one model, project (Anthropic workspace or OpenAI
+project) and API key, with service tier, so batch usage is priced at the batch discount. Only
+complete days are fetched, and fetching a day again replaces what was stored for it. In
+`summary`, these rows count as one call each; OpenAI's request count is kept in `meta.requests`.
+
+Usage APIs report totals, not requests, so they show where tokens and money go (model mix,
+cache hit rate, batch share) but give the request-level analyzers nothing to work with. Calls
+made through the API by a coding tool can appear both in that tool's logs and in the usage API;
+use `--source` to keep them apart.
 
 ## Finding waste
 
@@ -92,6 +119,6 @@ the same when the file is parsed again, so re-imports never double-count.
 ## Development
 
 ```sh
-npm test          # node:test: adapter fixtures, synthetic workload, analyzers
+npm test          # node:test: adapter and connector fixtures, synthetic workload, analyzers
 npm run typecheck
 ```
