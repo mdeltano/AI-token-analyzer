@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { adapters, findAdapter, type AdapterEnv } from '../adapters/index.ts';
+import { analyze, analyzers } from '../analyze/index.ts';
 import { importAll } from '../importer.ts';
 import { groupings, summarize, type Grouping } from '../report/summary.ts';
 import { UsageStore } from '../store/db.ts';
@@ -15,16 +16,17 @@ Commands:
   sources                 List supported tools and where their logs were found
   import                  Import usage from every detected tool's local logs
   summary                 Show token usage totals
+  analyze                 Find wasted tokens and estimate what fixing each case saves
   generate                Add a synthetic company workload with known, planted waste
 
 Options:
   --db <path>             Database file (default: $SUNDANCE_DB or ~/.sundance/usage.db)
-  --source <id>           Limit import/summary to one tool (see \`sundance sources\`);
-                          summary also accepts "${SYNTHETIC_SOURCE}"
+  --source <id>           Limit import/summary/analyze to one tool (see \`sundance sources\`);
+                          summary and analyze also accept "${SYNTHETIC_SOURCE}"
   --path <dir>            import: read logs from this directory instead of the default (repeatable)
   --full                  import: re-read files that are unchanged since the last import
   --by <grouping>         summary: ${Object.keys(groupings).join(' | ')} (default: source)
-  --since <YYYY-MM-DD>    summary: only usage on or after this date
+  --since <YYYY-MM-DD>    summary/analyze: only usage on or after this date
   --seed <n>              generate: random seed (default: 42)
   --days <n>              generate: days of traffic (default: 30)
   --end <YYYY-MM-DD>      generate: last day covered (default: yesterday)
@@ -34,10 +36,13 @@ Options:
 
 const fmt = new Intl.NumberFormat('en-US');
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function table(headers: string[], rows: string[][]): string {
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const line = (cells: string[]) => cells.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join('  ');
+  // numbers right-aligned, text left-aligned; the first column is always a label
+  const numeric = headers.map((_, i) => i > 0 && rows.every((r) => /^(?:[$\d.,%-]+|n\/a)$/.test(r[i]!)));
+  const line = (cells: string[]) => cells.map((c, i) => (numeric[i] ? c.padStart(widths[i]!) : c.padEnd(widths[i]!))).join('  ');
   return [line(headers), widths.map((w) => '-'.repeat(w)).join('  '), ...rows.map(line)].join('\n');
 }
 
@@ -68,7 +73,7 @@ function main(argv: string[]): number {
 
   const ctx: AdapterEnv = { home: homedir(), env: process.env };
   const selected = values.source ? findAdapter(values.source) : undefined;
-  const synthetic = values.source === SYNTHETIC_SOURCE && command === 'summary';
+  const synthetic = values.source === SYNTHETIC_SOURCE && (command === 'summary' || command === 'analyze');
   if (values.source && !selected && !synthetic) {
     process.stderr.write(`Unknown source "${values.source}". Known: ${adapters.map((a) => a.id).join(', ')}\n`);
     return 1;
@@ -118,6 +123,35 @@ function main(argv: string[]): number {
         fmt.format(r.cacheWrite), fmt.format(r.total), pct(r.cacheHitRate),
       ]);
       console.log(table([values.by, 'calls', 'input', 'output', 'cache read', 'cache write', 'total', 'cache hit'], body));
+      return 0;
+    }
+
+    if (command === 'analyze') {
+      const result = analyze(store.events({ since: values.since, source: values.source }));
+      if (!result.events) {
+        console.log('No usage stored yet. Run `sundance import` first.');
+        return 0;
+      }
+      const saved = result.findings.reduce((n, f) => n + (f.savingsUsd ?? 0), 0);
+      console.log(`Analyzed ${fmt.format(result.events)} calls, estimated spend ${usd.format(result.spendUsd)} at list price.`);
+      if (result.unpricedModels.length) console.log(`No price for: ${result.unpricedModels.join(', ')} (excluded from dollar figures).`);
+      if (!result.findings.length) {
+        console.log('\nNo waste found.');
+        return 0;
+      }
+      console.log(`${result.findings.length} findings, estimated savings ${usd.format(saved)}` +
+        `${result.spendUsd ? ` (${pct(saved / result.spendUsd)} of spend)` : ''}. Findings can overlap, so savings may not fully add up.\n`);
+      console.log(table(
+        ['#', 'waste', 'project', 'model', 'calls', 'tokens', 'est. savings'],
+        result.findings.map((f, i) => [
+          String(i + 1), f.kind, f.project ?? '(none)', f.model, fmt.format(f.events), fmt.format(f.tokens),
+          f.savingsUsd === null ? 'n/a' : usd.format(f.savingsUsd),
+        ]),
+      ));
+      result.findings.forEach((f, i) => {
+        const title = analyzers.find((a) => a.kind === f.kind)!.title;
+        console.log(`\n${i + 1}. ${title}: ${f.project ?? '(no project)'} on ${f.model}\n   ${f.evidence}\n   Fix: ${f.recommendation}`);
+      });
       return 0;
     }
 
