@@ -149,6 +149,10 @@ function fromClaudeCodeLog(rec: Record<string, any>, resource: Attrs, file: stri
     sourceFile: file,
     meta: {
       latencyMs: num(a.duration_ms) ?? null,
+      ttftMs: num(a.ttft_ms) ?? null,
+      // the 1-hour TTL is priced higher than the default 5 minutes
+      cacheWrite1h: tokens(num(a.cache_creation_1h_tokens)),
+      cacheWrite5m: tokens(num(a.cache_creation_5m_tokens)),
       querySource: str(a.query_source),
       speed: str(a.speed),
       effort: str(a.effort),

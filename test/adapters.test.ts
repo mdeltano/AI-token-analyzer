@@ -294,7 +294,7 @@ describe('otel', () => {
       attributes: kv({
         'event.name': 'api_request', 'event.timestamp': '2026-10-14T10:00:05.000Z', 'event.sequence': seq, 'session.id': 'sess-1',
         model: 'claude-opus-5-5', input_tokens: 12, output_tokens: 300, cache_read_tokens: 5000, cache_creation_tokens: 700,
-        cost_usd: 0.0123, duration_ms: 4200, request_id: `req_${seq}`, query_source: 'repl_main_thread', ...extra,
+        cache_creation_1h_tokens: 700, cache_creation_5m_tokens: 0, cost_usd: 0.0123, duration_ms: 4200, ttft_ms: 900, request_id: `req_${seq}`, query_source: 'repl_main_thread', ...extra,
       }),
     });
     const logs = {
@@ -315,6 +315,8 @@ describe('otel', () => {
     assert.equal(e!.sessionId, 'sess-1');
     assert.equal(e!.project, 'claude-code');
     assert.equal(e!.meta.latencyMs, 4200);
+    assert.equal(e!.meta.ttftMs, 900);
+    assert.equal(e!.meta.cacheWrite1h, 700);
   });
 
   it('takes a single file as a root', () => {
