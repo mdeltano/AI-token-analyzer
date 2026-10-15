@@ -8,6 +8,7 @@ import { codex } from '../src/adapters/codex.ts';
 import { copilotCli } from '../src/adapters/copilot-cli.ts';
 import { gemini } from '../src/adapters/gemini.ts';
 import { opencode } from '../src/adapters/opencode.ts';
+import { otel } from '../src/adapters/otel.ts';
 import { qwen } from '../src/adapters/qwen.ts';
 import type { SourceAdapter } from '../src/adapters/types.ts';
 import { usageEventSchema } from '../src/schema/usage-event.ts';
@@ -219,5 +220,106 @@ describe('copilot-cli', () => {
     assert.equal(events[0]!.granularity, 'aggregate');
     assert.equal(events[0]!.sessionId, 'abc-123');
     assert.equal(events[0]!.project, '/work/app');
+  });
+});
+
+describe('otel', () => {
+  type Value = string | number | boolean | string[];
+  const kv = (o: Record<string, Value>) => Object.entries(o).map(([key, v]) => ({
+    key,
+    value: Array.isArray(v) ? { arrayValue: { values: v.map((s) => ({ stringValue: s })) } }
+      : typeof v === 'number' ? (Number.isInteger(v) ? { intValue: String(v) } : { doubleValue: v })
+      : typeof v === 'boolean' ? { boolValue: v } : { stringValue: v },
+  }));
+  const start = 1_791_972_000_000_000_000; // 2026-10-14T10:00:00Z
+  const span = (id: string, a: Record<string, Value>, ms = 1500) => ({
+    traceId: '5B8EFFF798038103D269B633813FC60C', spanId: id, name: `chat ${a['gen_ai.request.model']}`, kind: 3,
+    startTimeUnixNano: String(start), endTimeUnixNano: String(start + ms * 1e6), attributes: kv(a),
+  });
+  const traces = (...spans: object[]) => ({
+    resourceSpans: [{ resource: { attributes: kv({ 'service.name': 'support-bot' }) }, scopeSpans: [{ scope: { name: 'x' }, spans }] }],
+  });
+  const chat = {
+    'gen_ai.operation.name': 'chat', 'gen_ai.provider.name': 'openai', 'gen_ai.request.model': 'gpt-5.5',
+    'gen_ai.response.model': 'gpt-5.5-2026-08-01', 'gen_ai.request.max_tokens': 512, 'gen_ai.response.finish_reasons': ['length'],
+    'gen_ai.usage.input_tokens': 1200, 'gen_ai.usage.cache_read.input_tokens': 1000, 'gen_ai.usage.cache_write.input_tokens': 50,
+    'gen_ai.usage.output_tokens': 512, 'gen_ai.usage.reasoning.output_tokens': 100, 'gen_ai.conversation.id': 'conv-1',
+    'gen_ai.system_instructions': '[{"type":"text","content":"You are a support agent."}]',
+  };
+
+  it('maps GenAI inference spans and moves cached tokens out of input', () => {
+    const root = tmpTree({
+      'traces.jsonl': jsonl(traces(
+        span('A1', chat),
+        span('A2', { ...chat, 'gen_ai.input.messages': '[{"role":"user","parts":[{"type":"text","content":"hi"}]}]' }),
+        span('A3', { ...chat, 'gen_ai.operation.name': 'invoke_agent' }), // wraps the chat spans: not counted
+        span('A4', { 'http.method': 'POST' }), // not a GenAI span
+      )) + '{"partial":',
+    });
+    const events = parseAll(otel, root);
+    assert.equal(events.length, 2);
+    const [e] = events;
+    assert.deepEqual(counts(e!), { input: 150, output: 512, reasoning: 100, cacheRead: 1000, cacheWrite: 50 });
+    assert.equal(e!.model, 'gpt-5.5-2026-08-01');
+    assert.equal(e!.vendor, 'openai');
+    assert.equal(e!.ts, '2026-10-14T10:00:00.000Z');
+    assert.equal(e!.sessionId, 'conv-1');
+    assert.equal(e!.project, 'support-bot');
+    assert.equal(e!.dedupeKey, 'otel:5b8efff798038103d269b633813fc60c:a1');
+    assert.equal(e!.meta.stopReason, 'length');
+    assert.equal(e!.meta.maxTokens, 512);
+    assert.equal(e!.meta.latencyMs, 1500);
+    assert.match(String(e!.meta.promptPrefixHash), /^[0-9a-f]{16}$/);
+    assert.equal(e!.meta.promptPrefixHash, events[1]!.meta.promptPrefixHash, 'same system prompt, same prefix hash');
+    assert.equal(e!.meta.requestHash, null, 'no input messages recorded, so no request hash');
+    assert.match(String(events[1]!.meta.requestHash), /^[0-9a-f]{16}$/);
+    assert.ok(!JSON.stringify(events).includes('support agent'), 'prompt text is never stored');
+  });
+
+  it('accepts the pre-rename token attributes and the old provider attribute', () => {
+    const root = tmpTree({
+      'old.json': jsonl(traces(span('B1', {
+        'gen_ai.system': 'anthropic', 'gen_ai.request.model': 'claude-sonnet-5', 'gen_ai.usage.prompt_tokens': 40, 'gen_ai.usage.completion_tokens': 9,
+      }))),
+    });
+    const [e] = parseAll(otel, root);
+    assert.deepEqual(counts(e!), { input: 40, output: 9, reasoning: 0, cacheRead: 0, cacheWrite: 0 });
+    assert.equal(e!.vendor, 'anthropic');
+    assert.equal(e!.meta.operation, null);
+  });
+
+  it('reads Claude Code api_request events, whose input already excludes cache', () => {
+    const record = (seq: number, extra: Record<string, Value> = {}) => ({
+      timeUnixNano: String(start), body: { stringValue: 'claude_code.api_request' },
+      attributes: kv({
+        'event.name': 'api_request', 'event.timestamp': '2026-10-14T10:00:05.000Z', 'event.sequence': seq, 'session.id': 'sess-1',
+        model: 'claude-opus-5-5', input_tokens: 12, output_tokens: 300, cache_read_tokens: 5000, cache_creation_tokens: 700,
+        cost_usd: 0.0123, duration_ms: 4200, request_id: `req_${seq}`, query_source: 'repl_main_thread', ...extra,
+      }),
+    });
+    const logs = {
+      resourceLogs: [{
+        resource: { attributes: kv({ 'service.name': 'claude-code' }) },
+        scopeLogs: [{ logRecords: [record(1), record(1), record(2), { ...record(3), body: { stringValue: 'claude_code.user_prompt' }, attributes: kv({ 'event.name': 'user_prompt' }) }] }],
+      }],
+    };
+    // a pretty-printed export, as `jq .` would leave it
+    const root = tmpTree({ 'logs.json': JSON.stringify(logs, null, 2) });
+    const events = parseAll(otel, root);
+    assert.equal(events.length, 2, 'repeated records are deduplicated; other events are ignored');
+    const [e] = events;
+    assert.deepEqual(counts(e!), { input: 12, output: 300, reasoning: 0, cacheRead: 5000, cacheWrite: 700 });
+    assert.equal(e!.ts, '2026-10-14T10:00:05.000Z');
+    assert.equal(e!.recordedCostUsd, 0.0123);
+    assert.equal(e!.dedupeKey, 'otel:claude-code:req_1');
+    assert.equal(e!.sessionId, 'sess-1');
+    assert.equal(e!.project, 'claude-code');
+    assert.equal(e!.meta.latencyMs, 4200);
+  });
+
+  it('takes a single file as a root', () => {
+    const root = tmpTree({ 'export.ndjson': jsonl(traces(span('C1', chat))) });
+    assert.equal(otel.discover(join(root, 'export.ndjson')).length, 1);
+    assert.deepEqual(otel.discover(join(root, 'missing.json')), []);
   });
 });
