@@ -1,3 +1,4 @@
+import type { WasteKind } from '../analyze/types.ts';
 import { makeEvent } from '../adapters/event.ts';
 import { totalTokens, type UsageEvent } from '../schema/usage-event.ts';
 import { createRng, subSeed, type Rng } from './random.ts';
@@ -14,7 +15,7 @@ import { createRng, subSeed, type Rng } from './random.ts';
 
 export const SYNTHETIC_SOURCE = 'synthetic';
 
-export type WasteKind = 'uncached-prefix' | 'oversized-model' | 'truncated-output' | 'retry-storm' | 'batch-eligible';
+export type { WasteKind } from '../analyze/types.ts';
 
 export interface PlantedWaste {
   kind: WasteKind;
