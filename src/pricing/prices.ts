@@ -96,12 +96,26 @@ export function priceFor(model: string): ModelPrice | undefined {
 export type TokenCounts = Pick<UsageEvent, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'> & {
   /** Part of `cacheWriteTokens` written with the 1-hour TTL. */
   cacheWrite1hTokens?: number;
+  granularity?: UsageEvent['granularity'];
+  meta?: UsageEvent['meta'];
 };
 
-/** List-price cost of one call's tokens on `price`, in USD. */
+const BAND_UNITS: Record<string, number> = { '': 1, k: 1e3, m: 1e6 };
+
+/**
+ * Whether long-context rates apply. A rollup's token total sums many requests and says nothing
+ * about any one prompt, so it counts as long context only when the context-window band it was
+ * grouped under (`meta.contextWindow`, e.g. "200k-1M") starts at or past the threshold.
+ */
+function isLongContext(t: TokenCounts, threshold: number): boolean {
+  if (t.granularity !== 'aggregate') return t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens > threshold;
+  const band = typeof t.meta?.contextWindow === 'string' ? /^(\d+)([km]?)-/i.exec(t.meta.contextWindow) : null;
+  return band ? Number(band[1]) * BAND_UNITS[band[2]!.toLowerCase()]! >= threshold : false;
+}
+
+/** List-price cost of one call's (or one rollup's) tokens on `price`, in USD. */
 export function tokenCost(t: TokenCounts, price: ModelPrice): number {
-  const prompt = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
-  const r: Rates = price.longContext && prompt > price.longContext.threshold ? price.longContext : price;
+  const r: Rates = price.longContext && isLongContext(t, price.longContext.threshold) ? price.longContext : price;
   const write1h = Math.min(t.cacheWrite1hTokens ?? 0, t.cacheWriteTokens);
   return (
     t.inputTokens * r.input +

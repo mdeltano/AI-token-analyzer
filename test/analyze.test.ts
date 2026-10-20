@@ -34,6 +34,14 @@ describe('prices', () => {
     assert.equal(tokenCost({ ...zero, inputTokens: 100_001 }, haiku), 100_001 * 0.5 / 1e6);
   });
 
+  it('judges a rollup by its context-window band, not its summed tokens', () => {
+    const haiku = priceFor('claude-haiku-5-5')!;
+    const day = { ...zero, inputTokens: 1_000_000, granularity: 'aggregate' as const };
+    assert.equal(tokenCost(day, haiku), 0.1);
+    assert.equal(tokenCost({ ...day, meta: { contextWindow: '0-200k' } }, haiku), 0.1);
+    assert.equal(tokenCost({ ...day, meta: { contextWindow: '200k-1M' } }, haiku), 0.5);
+  });
+
   it('discounts batch-tier events and returns null for unknown models', () => {
     const base = { dedupeKey: 'k', source: 's', ts: '2026-10-01T00:00:00.000Z', sourceFile: 'f', inputTokens: 1_000_000 };
     assert.equal(eventCost(makeEvent({ ...base, model: 'claude-sonnet-5-5', meta: { serviceTier: 'batch' } })), 1);
