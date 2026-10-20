@@ -38,4 +38,26 @@ describe('importAll', () => {
     assert.equal(row!.cacheHitRate, 1800 / 2020);
     store.close();
   });
+
+  it('completes a message first imported mid-response', () => {
+    const msg = (output: number, stop: string | null) => jsonl({
+      type: 'assistant',
+      requestId: 'r_m1',
+      sessionId: 's',
+      timestamp: '2026-10-14T10:00:00Z',
+      message: { id: 'm1', model: 'claude-opus-5-5', stop_reason: stop, usage: { input_tokens: 10, output_tokens: output } },
+    });
+    const root = tmpTree({ 'p/s.jsonl': msg(5, null) });
+    const store = new UsageStore(':memory:');
+    const opts = { adapters: [claudeCode], roots: [root] };
+    importAll(store, { home: root, env: {} }, opts);
+
+    appendFileSync(join(root, 'p', 's.jsonl'), msg(400, 'end_turn'));
+    assert.equal(importAll(store, { home: root, env: {} }, opts)[0]!.eventsAdded, 0);
+    const [event, ...rest] = store.events();
+    assert.equal(rest.length, 0);
+    assert.equal(event!.outputTokens, 400);
+    assert.equal(event!.meta.stopReason, 'end_turn');
+    store.close();
+  });
 });

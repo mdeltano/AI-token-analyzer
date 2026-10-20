@@ -7,7 +7,8 @@ import { isObject, isoTime, readJsonl, str, tokens, walkFiles } from './util.ts'
 /**
  * Claude Code transcripts: `<config>/projects/<project>/<session>.jsonl`, plus
  * `<session>/subagents/agent-*.jsonl`. One API response is written as several lines (one per
- * content block) that repeat the same `message.id` and usage, so events are keyed by message id.
+ * content block) that repeat the same `message.id`, so events are keyed by message id. Early lines
+ * can carry partial usage and no stop reason, so the last line's usage is kept.
  */
 export const claudeCode: SourceAdapter = {
   id: 'claude-code',
@@ -24,8 +25,7 @@ export const claudeCode: SourceAdapter = {
   },
 
   parse(file) {
-    const out: UsageEvent[] = [];
-    const seen = new Set<string>();
+    const byKey = new Map<string, UsageEvent>();
     const subagent = file.includes(`${sep}subagents${sep}`) || basename(file).startsWith('agent-');
 
     for (const line of readJsonl(file)) {
@@ -38,10 +38,10 @@ export const claudeCode: SourceAdapter = {
 
       const id = str(msg.id) ?? str(line.uuid);
       const key = `claude-code:${id}:${str(line.requestId) ?? ''}`;
-      if (!id || seen.has(key)) continue;
-      seen.add(key);
+      if (!id) continue;
 
-      const ts = isoTime(line.timestamp);
+      // keep the first line's timestamp, so the event's time is stable however much of it was logged
+      const ts = byKey.get(key)?.ts ?? isoTime(line.timestamp);
       if (!ts) continue;
 
       const event = makeEvent({
@@ -69,8 +69,8 @@ export const claudeCode: SourceAdapter = {
           version: str(line.version),
         },
       });
-      if (hasUsage(event)) out.push(event);
+      if (hasUsage(event)) byKey.set(key, event);
     }
-    return out;
+    return [...byKey.values()];
   },
 };

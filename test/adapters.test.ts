@@ -57,6 +57,17 @@ describe('claude-code', () => {
     assert.equal(events.filter((e) => e.meta.subagent).length, 1);
   });
 
+  it('keeps the last line of a message, whose usage is final', () => {
+    const partial = assistant('msg_1', 'thinking');
+    partial.message = { ...partial.message, stop_reason: null as unknown as string, usage: { ...partial.message.usage, output_tokens: 8 } };
+    const final = { ...assistant('msg_1', 'text'), timestamp: '2026-10-14T10:00:05.000Z' };
+    const [event, ...rest] = parseAll(claudeCode, tmpTree({ 'p/s.jsonl': jsonl(partial, final) }));
+    assert.equal(rest.length, 0);
+    assert.equal(event!.outputTokens, 200);
+    assert.equal(event!.meta.stopReason, 'end_turn');
+    assert.equal(event!.ts, '2026-10-14T10:00:00.000Z', 'timestamp stays the first line');
+  });
+
   it('skips synthetic messages', () => {
     const root = tmpTree({ 'p/s.jsonl': jsonl(assistant('msg_x', 'text', '<synthetic>')) });
     assert.equal(parseAll(claudeCode, root).length, 0);

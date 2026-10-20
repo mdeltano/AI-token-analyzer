@@ -50,7 +50,10 @@ export class UsageStore {
     this.db.exec(SCHEMA);
   }
 
-  /** Insert events, ignoring ones already stored. Returns how many were new. */
+  /**
+   * Insert events. An event already stored gets its token counts and metadata replaced, since a log
+   * read mid-response can hold partial usage that a later read completes. Returns how many were new.
+   */
   insert(events: UsageEvent[]): number {
     let added = 0;
     this.transaction(() => {
@@ -74,15 +77,24 @@ export class UsageStore {
 
   private insertRows(events: UsageEvent[]): number {
     const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO usage_events VALUES (
+      INSERT INTO usage_events VALUES (
         :dedupeKey, :source, :vendor, :model, :ts, :sessionId, :project, :inputTokens, :outputTokens,
-        :reasoningTokens, :cacheReadTokens, :cacheWriteTokens, :recordedCostUsd, :granularity, :sourceFile, :meta)`);
-    let added = 0;
+        :reasoningTokens, :cacheReadTokens, :cacheWriteTokens, :recordedCostUsd, :granularity, :sourceFile, :meta)
+      ON CONFLICT (dedupe_key) DO UPDATE SET
+        input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
+        reasoning_tokens = excluded.reasoning_tokens, cache_read_tokens = excluded.cache_read_tokens,
+        cache_write_tokens = excluded.cache_write_tokens, recorded_cost_usd = excluded.recorded_cost_usd,
+        meta = excluded.meta`);
+    const before = this.count();
     for (const raw of events) {
       const e = usageEventSchema.parse(raw);
-      added += Number(stmt.run({ ...e, meta: JSON.stringify(e.meta) }).changes);
+      stmt.run({ ...e, meta: JSON.stringify(e.meta) });
     }
-    return added;
+    return this.count() - before;
+  }
+
+  private count(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM usage_events').get() as { n: number }).n;
   }
 
   /** Read stored events back, oldest first. */
