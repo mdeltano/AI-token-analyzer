@@ -13,6 +13,8 @@ export type Grouping = keyof typeof groupings;
 export interface SummaryRow {
   key: string;
   events: number;
+  /** Events that are rollups of many calls (`granularity: 'aggregate'`), not single calls. */
+  rollups: number;
   input: number;
   output: number;
   cacheRead: number;
@@ -35,7 +37,7 @@ export function summarize(store: UsageStore, by: Grouping, filter: { since?: str
   }
   const rows = store.db
     .prepare(
-      `SELECT ${groupings[by]} AS key, COUNT(*) AS events,
+      `SELECT ${groupings[by]} AS key, COUNT(*) AS events, SUM(granularity = 'aggregate') AS rollups,
               SUM(input_tokens) AS input, SUM(output_tokens) AS output,
               SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite
        FROM usage_events ${where.length ? `WHERE ${where.join(' AND ')}` : ''}

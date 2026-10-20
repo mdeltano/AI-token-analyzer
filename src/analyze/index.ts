@@ -13,6 +13,8 @@ export const analyzers: Analyzer[] = [uncachedPrefix, oversizedModel, truncatedO
 
 export interface Analysis {
   events: number;
+  /** Events that are rollups of many calls rather than one call each. */
+  rollups: number;
   /** Estimated list-price spend on priced models. */
   spendUsd: number;
   /** Models with no entry in the price table; their findings report tokens only. */
@@ -32,5 +34,6 @@ export function analyze(events: UsageEvent[]): Analysis {
   const findings = analyzers
     .flatMap((a) => a.run(events))
     .sort((a, b) => (b.savingsUsd ?? -1) - (a.savingsUsd ?? -1) || b.tokens - a.tokens);
-  return { events: events.length, spendUsd, unpricedModels: [...unpriced].sort(), findings };
+  const rollups = events.filter((e) => e.granularity === 'aggregate').length;
+  return { events: events.length, rollups, spendUsd, unpricedModels: [...unpriced].sort(), findings };
 }

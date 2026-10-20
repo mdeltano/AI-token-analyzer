@@ -158,16 +158,19 @@ async function main(argv: string[]): Promise<number> {
         console.log('No usage stored yet. Run `sundance import` first.');
         return 0;
       }
-      const sum = (k: 'events' | 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'total') => rows.reduce((n, r) => n + r[k], 0);
+      const sum = (k: 'events' | 'rollups' | 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'total') => rows.reduce((n, r) => n + r[k], 0);
       const inputSide = sum('input') + sum('cacheRead') + sum('cacheWrite');
+      // rollups (daily API totals, session totals) cover many calls each, so they get their own column
+      const showRollups = sum('rollups') > 0;
       const body = [...rows, {
-        key: 'TOTAL', events: sum('events'), input: sum('input'), output: sum('output'), cacheRead: sum('cacheRead'),
+        key: 'TOTAL', events: sum('events'), rollups: sum('rollups'), input: sum('input'), output: sum('output'), cacheRead: sum('cacheRead'),
         cacheWrite: sum('cacheWrite'), total: sum('total'), cacheHitRate: inputSide ? sum('cacheRead') / inputSide : 0,
       }].map((r) => [
-        r.key, fmt.format(r.events), fmt.format(r.input), fmt.format(r.output), fmt.format(r.cacheRead),
-        fmt.format(r.cacheWrite), fmt.format(r.total), pct(r.cacheHitRate),
+        r.key, fmt.format(r.events - r.rollups), ...(showRollups ? [fmt.format(r.rollups)] : []), fmt.format(r.input),
+        fmt.format(r.output), fmt.format(r.cacheRead), fmt.format(r.cacheWrite), fmt.format(r.total), pct(r.cacheHitRate),
       ]);
-      console.log(table([values.by, 'calls', 'input', 'output', 'cache read', 'cache write', 'total', 'cache hit'], body));
+      console.log(table([values.by, 'calls', ...(showRollups ? ['rollups'] : []), 'input', 'output', 'cache read', 'cache write', 'total', 'cache hit'], body));
+      if (showRollups) console.log('\nRollups are pre-summed usage (daily provider-API totals, session totals) covering many calls each.');
       return 0;
     }
 
@@ -178,7 +181,8 @@ async function main(argv: string[]): Promise<number> {
         return 0;
       }
       const saved = result.findings.reduce((n, f) => n + (f.savingsUsd ?? 0), 0);
-      console.log(`Analyzed ${fmt.format(result.events)} calls, estimated spend ${usd.format(result.spendUsd)} at list price.`);
+      const rollups = result.rollups ? ` and ${fmt.format(result.rollups)} usage rollups` : '';
+      console.log(`Analyzed ${fmt.format(result.events - result.rollups)} calls${rollups}, estimated spend ${usd.format(result.spendUsd)} at list price.`);
       if (result.unpricedModels.length) console.log(`No price for: ${result.unpricedModels.join(', ')} (excluded from dollar figures).`);
       if (!result.findings.length) {
         console.log('\nNo waste found.');
