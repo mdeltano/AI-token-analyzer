@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { claudeCode } from '../src/adapters/claude-code.ts';
+import { makeEvent } from '../src/adapters/event.ts';
 import { importAll } from '../src/importer.ts';
 import { summarize } from '../src/report/summary.ts';
 import { UsageStore } from '../src/store/db.ts';
@@ -58,6 +59,24 @@ describe('importAll', () => {
     assert.equal(rest.length, 0);
     assert.equal(event!.outputTokens, 400);
     assert.equal(event!.meta.stopReason, 'end_turn');
+    store.close();
+  });
+});
+
+describe('combining sources', () => {
+  const base = { model: 'claude-opus-5-5', ts: '2026-10-14T10:00:00.000Z', sourceFile: 'f', inputTokens: 10, outputTokens: 90 };
+
+  it('counts a call logged by both the transcript and OTel once, keeping the transcript copy', () => {
+    const store = new UsageStore(':memory:');
+    store.insert([
+      makeEvent({ ...base, dedupeKey: 'claude-code:m1:req_1', source: 'claude-code', meta: { requestId: 'req_1', stopReason: 'end_turn' } }),
+      makeEvent({ ...base, dedupeKey: 'otel:claude-code:req_1', source: 'otel', meta: { requestId: 'req_1' } }),
+      makeEvent({ ...base, dedupeKey: 'otel:claude-code:req_2', source: 'otel', meta: { requestId: 'req_2' } }),
+    ]);
+    assert.deepEqual(store.events().map((e) => e.dedupeKey), ['claude-code:m1:req_1', 'otel:claude-code:req_2']);
+    assert.equal(summarize(store, 'source').reduce((n, r) => n + r.events, 0), 2);
+    assert.equal(store.events({ source: 'otel' }).length, 2, 'asking for one source shows all of it');
+    assert.equal(summarize(store, 'source', { source: 'otel' })[0]!.events, 2);
     store.close();
   });
 });
