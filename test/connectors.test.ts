@@ -157,6 +157,13 @@ describe('openaiApi', () => {
     assert.equal(events.length, 2);
     assert.deepEqual(waits, [2000, 2000]);
 
+    let calls = 0;
+    const stalled = (async (...args: Parameters<typeof fetch>) => {
+      if (calls++ === 0) throw new DOMException('The operation timed out.', 'TimeoutError');
+      return fakeFetch([openaiPage]).fn(...args);
+    }) as typeof fetch;
+    assert.equal((await openaiApi.fetchUsage({ key: 'k', since, until, http: { fetch: stalled, sleep } })).length, 2, 'a timeout is retried');
+
     const denied = fakeFetch([new Fail(401, '{"error":{"message":"Invalid admin key"}}')]);
     await assert.rejects(
       openaiApi.fetchUsage({ key: 'k', since, until, http: { fetch: denied.fn, sleep } }),
