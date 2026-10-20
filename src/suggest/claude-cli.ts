@@ -84,7 +84,9 @@ export const spawnClaude: Runner = (args, stdin, timeoutMs) =>
     child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
     child.on('error', (err: NodeJS.ErrnoException) =>
       reject(err.code === 'ENOENT'
-        ? new ClaudeCliError('Claude Code CLI not found on PATH. Install it and sign in (run `claude` once) to use suggest.')
+        ? new ClaudeCliError('Claude Code CLI not found on PATH. Install it and sign in (run `claude` once) to use suggest.' +
+            // Node can only start .exe files without a shell, and the npm install provides claude.cmd
+            (process.platform === 'win32' ? ' On Windows, use the native installer, which provides claude.exe.' : ''))
         : err));
     child.on('close', (code, signal) =>
       signal === 'SIGTERM' && !stdout
