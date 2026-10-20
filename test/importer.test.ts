@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { claudeCode } from '../src/adapters/claude-code.ts';
 import { makeEvent } from '../src/adapters/event.ts';
+import { analyze } from '../src/analyze/index.ts';
 import { importAll } from '../src/importer.ts';
 import { summarize } from '../src/report/summary.ts';
 import { UsageStore } from '../src/store/db.ts';
@@ -77,6 +78,18 @@ describe('combining sources', () => {
     assert.equal(summarize(store, 'source').reduce((n, r) => n + r.events, 0), 2);
     assert.equal(store.events({ source: 'otel' }).length, 2, 'asking for one source shows all of it');
     assert.equal(summarize(store, 'source', { source: 'otel' })[0]!.events, 2);
+    store.close();
+  });
+
+  it('tells rollups apart from single calls', () => {
+    const store = new UsageStore(':memory:');
+    store.insert([
+      makeEvent({ ...base, dedupeKey: 'a', source: 'claude-code' }),
+      makeEvent({ ...base, dedupeKey: 'b', source: 'anthropic-api', granularity: 'aggregate' }),
+    ]);
+    assert.deepEqual(summarize(store, 'source').map((r) => [r.key, r.events, r.rollups]).sort(), [['anthropic-api', 1, 1], ['claude-code', 1, 0]]);
+    const result = analyze(store.events());
+    assert.deepEqual([result.events, result.rollups], [2, 1]);
     store.close();
   });
 });
