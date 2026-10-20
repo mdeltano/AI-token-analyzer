@@ -60,9 +60,11 @@ Two kinds of record are read:
   `service.name`, unless a span sets `sundance.feature`. A `sundance.trigger` attribute (for
   example `cron`) marks scheduled calls for the batch analyzer.
 - **Claude Code `claude_code.api_request` events**, which Claude Code exports as OTel logs when
-  `CLAUDE_CODE_ENABLE_TELEMETRY=1` and `OTEL_LOGS_EXPORTER=otlp`. They duplicate what the
-  `claude-code` source reads from local transcripts, so import one or the other for the same
-  machine.
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1` and `OTEL_LOGS_EXPORTER=otlp`. They describe the same calls
+  that the `claude-code` source reads from local transcripts. When both are imported, reports
+  count each request once, using the transcript's copy; `--source otel` still shows every event.
+  Calls made without a transcript (for example `claude -p --no-session-persistence`) are only in
+  the OTel export.
 
 Spans record the stop reason, `max_tokens` and latency that aggregate sources lack. When an
 instrumentation records prompt content (`gen_ai.system_instructions`, `gen_ai.tool.definitions`,
