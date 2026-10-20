@@ -58,6 +58,7 @@ export const claudeCode: SourceAdapter = {
         cacheWriteTokens: tokens(usage.cache_creation_input_tokens),
         sourceFile: file,
         meta: {
+          requestId: str(line.requestId),
           stopReason: str(msg.stop_reason),
           serviceTier: str(usage.service_tier),
           cacheWrite1h: tokens(usage.cache_creation?.ephemeral_1h_input_tokens),

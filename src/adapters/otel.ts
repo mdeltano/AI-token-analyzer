@@ -148,6 +148,8 @@ function fromClaudeCodeLog(rec: Record<string, any>, resource: Attrs, file: stri
     recordedCostUsd: cost !== undefined && cost >= 0 ? cost : null,
     sourceFile: file,
     meta: {
+      // the same ID as `requestId` in Claude Code's transcripts, so the store can drop the duplicate
+      requestId: str(a.request_id),
       latencyMs: num(a.duration_ms) ?? null,
       ttftMs: num(a.ttft_ms) ?? null,
       // the 1-hour TTL is priced higher than the default 5 minutes

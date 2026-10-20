@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS usage_events_ts ON usage_events (ts);
 CREATE INDEX IF NOT EXISTS usage_events_source_model ON usage_events (source, model);
+CREATE INDEX IF NOT EXISTS usage_events_request_id ON usage_events (json_extract(meta, '$.requestId'));
 
 -- size+mtime of each imported file, so unchanged files are skipped on the next import
 CREATE TABLE IF NOT EXISTS imported_files (
@@ -34,6 +35,15 @@ CREATE TABLE IF NOT EXISTS imported_files (
   imported_at TEXT NOT NULL
 );
 `;
+
+/**
+ * SQL condition that drops an `otel` event when another source logged the same provider request
+ * (`meta.requestId`). Claude Code's transcripts and its OTel events describe the same calls, and the
+ * transcript also has the stop reason, so it is the copy kept. Applies when sources are combined.
+ */
+export const DISTINCT_CALLS = `NOT (source = 'otel' AND json_extract(meta, '$.requestId') IS NOT NULL AND EXISTS (
+  SELECT 1 FROM usage_events other WHERE other.source <> 'otel'
+    AND json_extract(other.meta, '$.requestId') = json_extract(usage_events.meta, '$.requestId')))`;
 
 export interface FileStamp {
   size: number;
@@ -97,9 +107,9 @@ export class UsageStore {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM usage_events').get() as { n: number }).n;
   }
 
-  /** Read stored events back, oldest first. */
+  /** Read stored events back, oldest first, counting each call once across sources. */
   events(filter: { since?: string; source?: string } = {}): UsageEvent[] {
-    const where: string[] = [];
+    const where: string[] = filter.source ? [] : [DISTINCT_CALLS];
     const params: Record<string, string> = {};
     if (filter.since) {
       where.push('ts >= :since');

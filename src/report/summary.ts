@@ -1,4 +1,4 @@
-import type { UsageStore } from '../store/db.ts';
+import { DISTINCT_CALLS, type UsageStore } from '../store/db.ts';
 
 export const groupings = {
   source: 'source',
@@ -23,7 +23,7 @@ export interface SummaryRow {
 }
 
 export function summarize(store: UsageStore, by: Grouping, filter: { since?: string; source?: string } = {}): SummaryRow[] {
-  const where: string[] = [];
+  const where: string[] = filter.source ? [] : [DISTINCT_CALLS];
   const params: Record<string, string> = {};
   if (filter.since) {
     where.push('ts >= :since');
