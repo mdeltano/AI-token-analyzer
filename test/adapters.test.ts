@@ -173,6 +173,14 @@ describe('opencode', () => {
     assert.deepEqual(events.map((e) => e.dedupeKey), ['opencode:ses_1:m1', 'opencode:ses_1:m2']);
     assert.equal(events[1]!.vendor, 'anthropic');
   });
+
+  it('finds the database under a root spelled with forward slashes and a trailing slash', () => {
+    const root = tmpTree({});
+    const db = new DatabaseSync(join(root, 'opencode.db'));
+    db.exec('CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data BLOB);');
+    db.close();
+    assert.equal(opencode.discover(`${root.replaceAll('\\', '/')}/`).length, 1);
+  });
 });
 
 describe('amp', () => {

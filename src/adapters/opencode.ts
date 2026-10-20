@@ -1,4 +1,4 @@
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { UsageEvent } from '../schema/usage-event.ts';
 import { hasUsage, makeEvent } from './event.ts';
@@ -109,7 +109,8 @@ export const opencode: SourceAdapter = {
   },
 
   discover(root) {
-    const dbs = walkFiles(root, (p) => dirname(p) === root && /^opencode[^\\/]*\.db$/.test(basename(p)));
+    // walkFiles normalizes the paths it returns, so compare resolved forms (`S:/x/` vs `S:\x`)
+    const dbs = walkFiles(root, (p) => resolve(dirname(p)) === resolve(root) &&/^opencode[^\\/]*\.db$/.test(basename(p)));
     const messages = walkFiles(join(root, 'storage', 'message'), (p) => p.endsWith('.json'));
     return [...dbs, ...messages];
   },
