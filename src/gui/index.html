@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sundance</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f3f2ef;
+    --surface-1: #fcfcfb;
+    --border: #dddcd7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --accent: #2a78d6;
+    --accent-ink: #ffffff;
+    --critical: #c4302f;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --border: #33322f;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --accent: #3987e5;
+      --accent-ink: #ffffff;
+      --critical: #e66767;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --border: #33322f;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --accent: #3987e5;
+    --accent-ink: #ffffff;
+    --critical: #e66767;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 0 0 4px; }
+  .muted { color: var(--text-muted); }
+  .secondary { color: var(--text-secondary); }
+  .small { font-size: 12px; }
+  section { margin-top: 28px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .filters { position: sticky; top: 0; z-index: 1; background: var(--surface-0); padding: 8px 0; }
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  input, select, button { font: inherit; color: inherit; }
+  input[type="date"], input[type="number"], select {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+  }
+  input[type="number"] { width: 72px; }
+  button {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; font-weight: 600;
+  }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.55; cursor: progress; }
+  .result { margin-top: 10px; font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; }
+  .error { color: var(--critical); }
+  ul.plain { list-style: none; padding: 0; margin: 8px 0; }
+  ul.plain li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--text-muted); }
+  .dot.on { background: var(--series-3); }
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tile .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .label { color: var(--text-secondary); font-size: 12px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  td.bar { width: 40%; min-width: 160px; }
+  .stack { display: flex; gap: 2px; height: 12px; }
+  .stack span { height: 100%; }
+  .stack span:first-child { border-radius: 4px 0 0 4px; }
+  .stack span:last-child { border-radius: 0 4px 4px 0; }
+  .stack span:only-child { border-radius: 4px; }
+  .hbar { height: 12px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .finding { margin-top: 12px; }
+  .finding .head { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: baseline; }
+  .finding .savings { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .finding p { margin: 6px 0; }
+  .kind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .suggestion { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  pre { background: var(--surface-0); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 12px; }
+  .empty { padding: 24px; text-align: center; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sundance</h1>
+    <span class="secondary">Find wasted LLM tokens and what fixing them saves</span>
+    <span class="muted small" id="db"></span>
+  </header>
+
+  <div class="filters row">
+    <label>Source <select id="f-source"><option value="">All sources</option></select></label>
+    <label>Since <input type="date" id="f-since"></label>
+    <button class="ghost" id="refresh">Refresh</button>
+  </div>
+
+  <section>
+    <h2>Data</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Local tool logs</h3>
+        <div class="muted small">Coding tools found on this machine</div>
+        <ul class="plain small" id="adapters"></ul>
+        <div class="row">
+          <button id="do-import">Import logs</button>
+          <label class="small"><input type="checkbox" id="import-full"> Re-read unchanged files</label>
+        </div>
+        <div class="result" id="import-result"></div>
+      </div>
+      <div class="card">
+        <h3>Demo workload</h3>
+        <div class="muted small">A fictional company with known, planted waste</div>
+        <div class="row" style="margin: 10px 0">
+          <label class="small">Seed <input type="number" id="gen-seed" value="42"></label>
+          <label class="small">Days <input type="number" id="gen-days" value="30" min="1"></label>
+        </div>
+        <button id="do-generate">Generate demo data</button>
+        <div class="result" id="generate-result"></div>
+      </div>
+      <div class="card">
+        <h3>Provider usage APIs</h3>
+        <div class="muted small">Daily org totals; needs admin keys in the environment</div>
+        <ul class="plain small" id="connectors"></ul>
+        <div class="row">
+          <button id="do-fetch">Fetch usage</button>
+          <label class="small">From <input type="date" id="fetch-since"></label>
+        </div>
+        <div class="result" id="fetch-result"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Overview</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section>
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px">
+      <h2 style="margin: 0">Usage</h2>
+      <label>Group by <select id="by"></select></label>
+    </div>
+    <div class="card">
+      <div class="legend">
+        <span><i style="background: var(--series-1)"></i>Input</span>
+        <span><i style="background: var(--series-2)"></i>Cache read</span>
+        <span><i style="background: var(--series-3)"></i>Cache write</span>
+        <span><i style="background: var(--series-4)"></i>Output</span>
+      </div>
+      <div class="scroll" id="usage"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+    <div id="findings-note" class="secondary small"></div>
+    <div id="findings"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = new Intl.NumberFormat('en-US');
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const pct = (n) => `${(n * 100).toFixed(1)}%`;
+
+/** Build an element; strings become text nodes, so log-derived values are never parsed as HTML. */
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? res.statusText);
+  return data;
+}
+
+const filters = () => ({ source: $('f-source').value, since: $('f-since').value });
+const query = (extra = {}) => new URLSearchParams({ ...filters(), ...extra }).toString();
+
+/** Run an action from a button, disabling it and reporting a returned message or error in `out`. */
+async function action(button, out, busy, fn) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = busy;
+  out.classList.remove('error');
+  out.textContent = '';
+  try {
+    const message = await fn();
+    if (typeof message === 'string') out.textContent = message;
+  } catch (err) {
+    out.classList.add('error');
+    out.textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function loadSources() {
+  const s = await api('/api/sources');
+  $('db').textContent = `Database: ${s.db}`;
+  $('adapters').replaceChildren(...s.adapters.map((a) => h('li', {},
+    h('span', {}, h('span', { class: `dot${a.found.length ? ' on' : ''}` }), a.name),
+    h('span', { class: 'muted', title: a.found.join('\n') || undefined }, a.found.length ? 'found' : 'not found'))));
+  $('connectors').replaceChildren(...s.connectors.map((c) => h('li', {},
+    h('span', {}, h('span', { class: `dot${c.keySet ? ' on' : ''}` }), c.name),
+    h('span', { class: 'muted' }, `${c.keyEnv} ${c.keySet ? 'set' : 'not set'}`))));
+  $('do-fetch').disabled = !s.connectors.some((c) => c.keySet);
+  const ids = [...s.adapters.map((a) => [a.id, a.name]), ...s.connectors.map((c) => [c.id, c.name]), [s.synthetic, 'Demo workload']];
+  $('f-source').append(...ids.map(([id, name]) => h('option', { value: id }, name)));
+  $('by').append(...s.groupings.map((g) => h('option', { value: g }, g)));
+}
+
+function tile(value, label) {
+  return h('div', { class: 'card tile' }, h('div', { class: 'value' }, value), h('div', { class: 'label' }, label));
+}
+
+const SEGMENTS = [['input', 'Input', 1], ['cacheRead', 'Cache read', 2], ['cacheWrite', 'Cache write', 3], ['output', 'Output', 4]];
+
+async function loadUsage() {
+  const rows = await api(`/api/summary?${query({ by: $('by').value })}`);
+  if (!rows.length) {
+    $('usage').replaceChildren(h('div', { class: 'empty' }, 'No usage stored yet. Import logs or generate demo data above.'));
+    return;
+  }
+  const max = Math.max(...rows.map((r) => r.total));
+  const showRollups = rows.some((r) => r.rollups > 0);
+  $('usage').replaceChildren(h('table', {},
+    h('thead', {}, h('tr', {},
+      h('th', {}, $('by').value), h('th', { class: 'num' }, 'calls'), showRollups && h('th', { class: 'num' }, 'rollups'),
+      h('th', { class: 'num' }, 'tokens'), h('th', { class: 'num' }, 'cache hit'), h('th', {}, 'token mix'))),
+    h('tbody', {}, rows.map((r) => h('tr', {},
+      h('td', {}, r.key),
+      h('td', { class: 'num' }, fmt.format(r.events - r.rollups)),
+      showRollups && h('td', { class: 'num' }, fmt.format(r.rollups)),
+      h('td', { class: 'num' }, compact.format(r.total)),
+      h('td', { class: 'num' }, pct(r.cacheHitRate)),
+      h('td', { class: 'bar' }, h('div', { class: 'stack', style: { width: `${(r.total / max) * 100}%` } },
+        SEGMENTS.filter(([k]) => r[k] > 0).map(([k, name, slot]) => h('span', {
+          style: { flex: `${r[k]} 0 0`, background: `var(--series-${slot})` },
+          title: `${r.key}\n${name}: ${fmt.format(r[k])} tokens (${pct(r[k] / r.total)})`,
+        })))))))));
+}
+
+function renderSuggestion(s) {
+  return h('div', {},
+    h('p', {}, h('strong', {}, s.summary)),
+    s.changes.map((c, i) => h('div', {},
+      h('p', {}, h('strong', {}, `Change ${i + 1}: `), c.where),
+      h('p', { class: 'secondary' }, c.what),
+      c.snippet.trim() && h('pre', {}, c.snippet))),
+    h('p', {}, h('strong', {}, 'Verify: '), s.verify),
+    s.caveats.trim() && h('p', { class: 'secondary' }, h('strong', {}, 'Caveats: '), s.caveats));
+}
+
+function findingCard(f, n, maxSavings, filter) {
+  const out = h('div', { class: 'result' });
+  const file = h('input', { type: 'file', class: 'small' });
+  const button = h('button', {}, 'Draft fix with Claude');
+  button.addEventListener('click', () => action(button, out, 'Drafting… (about 30s)', async () => {
+    const picked = file.files[0];
+    const context = picked ? { name: picked.name, text: await picked.text() } : undefined;
+    const res = await api('/api/suggest', { ...filter, finding: n, context });
+    const cost = res.costUsd === null ? '' : `, ${usd.format(res.costUsd)} at API list price`;
+    out.replaceChildren(h('div', { class: 'suggestion' }, renderSuggestion(res.suggestion),
+      h('p', { class: 'muted small' }, `Drafted by ${res.models.join(', ')} through Claude Code${cost}.`)));
+  }));
+  return h('div', { class: 'card finding' },
+    h('div', { class: 'head' },
+      h('div', {},
+        h('div', { class: 'kind' }, `#${n} · ${f.kind}`),
+        h('h3', {}, `${f.title}: ${f.project ?? '(no project)'}`),
+        h('div', { class: 'muted small' }, `${f.model} · ${fmt.format(f.events)} calls · ${fmt.format(f.tokens)} tokens`)),
+      h('div', { class: 'savings', title: 'Estimated savings over the analyzed period' },
+        f.savingsUsd === null ? 'n/a' : usd.format(f.savingsUsd))),
+    f.savingsUsd !== null && maxSavings > 0 && h('div', {
+      class: 'hbar', style: { width: `${(f.savingsUsd / maxSavings) * 100}%`, margin: '8px 0' },
+      title: `Est. savings ${usd.format(f.savingsUsd)}`,
+    }),
+    h('p', {}, f.evidence),
+    h('p', { class: 'secondary' }, h('strong', {}, 'Fix: '), f.recommendation),
+    h('div', { class: 'row' }, button, h('label', { class: 'small' }, 'Context file (optional)', file)),
+    out);
+}
+
+async function loadAnalysis() {
+  const filter = filters();
+  const a = await api(`/api/analyze?${query()}`);
+  const saved = a.findings.reduce((n, f) => n + (f.savingsUsd ?? 0), 0);
+  $('tiles').replaceChildren(
+    tile(fmt.format(a.events - a.rollups), a.rollups ? `calls + ${fmt.format(a.rollups)} rollups` : 'calls'),
+    tile(usd.format(a.spendUsd), 'est. spend at list price'),
+    tile(fmt.format(a.findings.length), 'findings'),
+    tile(usd.format(saved), a.spendUsd ? `est. savings (${pct(saved / a.spendUsd)} of spend)` : 'est. savings'));
+  const notes = [];
+  if (a.unpricedModels.length) notes.push(`No price for ${a.unpricedModels.join(', ')}; excluded from dollar figures.`);
+  if (a.findings.length > 1) notes.push('Findings can overlap, so savings may not fully add up.');
+  $('findings-note').textContent = notes.join(' ');
+  const maxSavings = Math.max(0, ...a.findings.map((f) => f.savingsUsd ?? 0));
+  $('findings').replaceChildren(...(a.findings.length
+    ? a.findings.map((f, i) => findingCard(f, i + 1, maxSavings, filter))
+    : [h('div', { class: 'card empty' }, a.events ? 'No waste found.' : 'No usage stored yet.')]));
+}
+
+async function refresh() {
+  try {
+    await Promise.all([loadUsage(), loadAnalysis()]);
+  } catch (err) {
+    $('findings').replaceChildren(h('div', { class: 'card empty error' }, err.message));
+  }
+}
+
+$('do-import').addEventListener('click', (e) => action(e.target, $('import-result'), 'Importing…', async () => {
+  const rows = await api('/api/import', { full: $('import-full').checked });
+  await refresh();
+  if (!rows.length) return 'No logs found for any supported tool.';
+  return rows.map((r) => `${r.source}: ${fmt.format(r.filesParsed)} files read, ${fmt.format(r.eventsAdded)} new calls`).join('\n');
+}));
+
+$('do-generate').addEventListener('click', (e) => action(e.target, $('generate-result'), 'Generating…', async () => {
+  const r = await api('/api/generate', { seed: $('gen-seed').value, days: $('gen-days').value });
+  await refresh();
+  return `${fmt.format(r.events)} calls (${fmt.format(r.added)} new) over ${r.days} days ending ${r.end}, ` +
+    `with ${r.planted.length} kinds of planted waste.`;
+}));
+
+$('do-fetch').addEventListener('click', (e) => action(e.target, $('fetch-result'), 'Fetching…', async () => {
+  const rows = await api('/api/fetch', { since: $('fetch-since').value });
+  await refresh();
+  return rows.map((r) => `${r.source}: ${r.status === 'ok' ? `${fmt.format(r.events)} daily rows, ${compact.format(r.tokens)} tokens` : `${r.status}, ${r.detail}`}`).join('\n');
+}));
+
+for (const id of ['f-source', 'f-since']) $(id).addEventListener('change', refresh);
+$('by').addEventListener('change', () => loadUsage().catch((err) => $('usage').replaceChildren(h('div', { class: 'empty error' }, err.message))));
+$('refresh').addEventListener('click', refresh);
+
+loadSources().then(refresh).catch((err) => $('findings').replaceChildren(h('div', { class: 'card empty error' }, err.message)));
+</script>
+</body>
+</html>

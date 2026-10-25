@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -6,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { adapters, findAdapter, type AdapterEnv } from '../adapters/index.ts';
 import { analyze, analyzers } from '../analyze/index.ts';
 import { connectors, fetchAll, findConnector } from '../connectors/index.ts';
+import { createGuiServer } from '../gui/server.ts';
 import { importAll } from '../importer.ts';
 import { groupings, summarize, type Grouping } from '../report/summary.ts';
 import { UsageStore } from '../store/db.ts';
@@ -22,6 +24,7 @@ Commands:
   analyze                 Find wasted tokens and estimate what fixing each case saves
   suggest                 Draft concrete fixes for the top findings with Claude (via the Claude Code CLI)
   generate                Add a synthetic company workload with known, planted waste
+  ui                      Open a local web page that runs all of the above
 
 Options:
   --db <path>             Database file (default: $SUNDANCE_DB or ~/.sundance/usage.db)
@@ -41,6 +44,8 @@ Options:
   --end <YYYY-MM-DD>      generate: last day covered (default: yesterday)
   --scale <x>             generate: call volume multiplier (default: 1)
   --manifest <file>       generate: also write the planted-waste manifest as JSON
+  --port <n>              ui: port to listen on, on 127.0.0.1 only (default: 4173)
+  --no-open               ui: print the address instead of opening a browser
 `;
 
 const fmt = new Intl.NumberFormat('en-US');
@@ -71,6 +76,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
+    allowNegative: true,
     options: {
       db: { type: 'string' },
       source: { type: 'string' },
@@ -87,6 +93,8 @@ async function main(argv: string[]): Promise<number> {
       top: { type: 'string' },
       context: { type: 'string' },
       model: { type: 'string' },
+      port: { type: 'string' },
+      open: { type: 'boolean', default: true },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -117,7 +125,32 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const store = new UsageStore(values.db ?? process.env.SUNDANCE_DB ?? join(ctx.home, '.sundance', 'usage.db'));
+  const dbPath = values.db ?? process.env.SUNDANCE_DB ?? join(ctx.home, '.sundance', 'usage.db');
+  const store = new UsageStore(dbPath);
+
+  if (command === 'ui') {
+    const port = values.port === undefined ? 4173 : Number(values.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+      store.close();
+      process.stderr.write('--port must be a whole number from 0 to 65535.\n');
+      return 1;
+    }
+    // the store stays open for as long as the server runs
+    const server = createGuiServer({ store, dbPath, ctx });
+    server.on('close', () => store.close());
+    server.listen(port, '127.0.0.1', () => {
+      const { port: bound } = server.address() as { port: number };
+      const url = `http://127.0.0.1:${bound}/`;
+      console.log(`Sundance UI running at ${url} (Ctrl+C to stop)`);
+      if (values.open) {
+        const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+          : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+        spawn(cmd, args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+      }
+    });
+    return 0;
+  }
+
   try {
     if (command === 'import') {
       const results = importAll(store, ctx, {
